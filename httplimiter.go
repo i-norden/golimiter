@@ -1,10 +1,11 @@
-package httplimiter
+package limiter
 
 import (
-  funcs "../funcs"
 	"net/http"
 	"time"
   "sync"
+  "strings"
+  "io/ioutil"
 
   "golang.org/x/time/rate"
 )
@@ -12,34 +13,47 @@ import (
 // Create a custom visitor struct which holds the rate limiter for each
 // visitor and the last time that the visitor was seen.
 type visitor struct {
-    Limiter  *rate.Limiter
+    limiter  *rate.Limiter
     lastSeen time.Time
 }
 
-// Initialize a limiter object from the imported rate module
-// In this case 1 call is allowed per second with bursts of up to 6 per second
-var limiter = rate.NewLimiter(1, 6)
-
 // Create a map to hold the visitor structs for each ip
 var visitors = make(map[string]*visitor)
+
+// Mutex for locking access to shared data structs
 var mtx sync.Mutex
 
 // Create whitelist to hold allowed ip addresses
 var whitelist = make([]string, 0)
 
 // Function to update whitelist to allow user access
-func UpdateWhitelist(ip string) {
-  in, _ := funcs.InArray(ip, whitelist)
-  if !in {
-    whitelist = append(whitelist, ip)
+func UpdateWhitelist(loc string) {
+  for {
+      mtx.Lock()
+      newList, err := readWhitelist(loc)
+      if err == nil {
+        whitelist = newList
+      }
+      mtx.Unlock()
+      time.Sleep(time.Minute*5)
   }
-  return
+}
+
+// Function for reading in whitelist
+func readWhitelist(loc string) (list []string, err error) {
+	raw, err := ioutil.ReadFile(loc)
+	if err != nil {
+		return
+	}
+  list = strings.Split(string(raw), "\r\n")
+	return
 }
 
 // Create a new rate limiter and add it to the visitors map, using the
 // IP address as the key.
 func addVisitor(ip string) *rate.Limiter {
-    limiter := rate.NewLimiter(2, 5)
+    // Create a token bucket limiter that allows 1 query/second or burst of 6
+    limiter := rate.NewLimiter(1, 6)
     mtx.Lock()
     // Include the current time when creating a new visitor.
     visitors[ip] = &visitor{limiter, time.Now()}
@@ -60,7 +74,7 @@ func getVisitor(ip string) *rate.Limiter {
     // Update the last seen time for the visitor.
     v.lastSeen = time.Now()
     mtx.Unlock()
-    return v.Limiter
+    return v.limiter
 }
 
 // Every minute check the map for visitors that haven't been seen for
@@ -78,17 +92,22 @@ func CleanupVisitors() {
     }
 }
 
-//checks incoming ip against their limit
+// Checks incoming ip against their limiter
 func Limit(next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        // Call the getVisitor function to retreive the rate limiter for
-        // the current user.
-        in, _ := funcs.InArray(r.RemoteAddr, whitelist)
+        // Check if incoming ip is on whitelist
+        mtx.Lock()
+        in, _ := InArray(r.RemoteAddr, whitelist)
+        mtx.Unlock()
+        // If not return 401 status
         if !in {
           http.Error(w, http.StatusText(401), http.StatusUnauthorized)
           return
         }
+        // Call the getVisitor function to retreive the rate limiter for
+        // the current user.
         limiter := getVisitor(r.RemoteAddr)
+        // If they have exceeded their limit, return 429 status
         if limiter.Allow() == false {
             http.Error(w, http.StatusText(429), http.StatusTooManyRequests)
             return
@@ -96,4 +115,15 @@ func Limit(next http.Handler) http.Handler {
 
         next.ServeHTTP(w, r)
     })
+}
+
+// Common function to check if string is in array
+func InArray(val string, array []string) (exists bool, index int) {
+	exists = false
+	for i, v := range array {
+		if val == v {
+			return true, i
+		}
+	}
+	return
 }
