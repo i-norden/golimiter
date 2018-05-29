@@ -4,52 +4,50 @@ Handling of X-Forwarded-For or X-Real-IP headers
 Reading white/blacklist from dbs
 Updating white/blacklist using rpc
 */
-package httplimiter
+package limiter
 
 import (
+	"errors"
 	"io/ioutil"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
-	"errors"
 
 	"golang.org/x/time/rate"
 )
 
-// Create a custom visitor struct which holds the rate limiter for each
+// Struct which holds the rate limiter for each
 // visitor and the last time that the visitor was seen.
 type visitor struct {
 	limiter  *rate.Limiter // Leaky-bucket limiter object
-	lastSeen time.Time // So that we know when to cleanup visitor
+	lastSeen time.Time     // So that we know when to cleanup visitor
 }
 
 // Struct to represent the IP limiter with control paramters
 type Limiter struct {
-  Rate rate.Limit
-	Burst int
+	Rate      rate.Limit
+	Burst     int
 	Whitelist struct { // Whitelist settings
-    On bool // On or off (default false- off)
-    Filename string // File location
-    UpdateFreq time.Duration // Update frequency (how often it reads file to check for changes)
-    quitChan chan bool // Channel used to stop the background goroutine
-  }
-  Blacklist struct { // Blacklist settings
-    On bool // On or off (default false- off)
-    Filename string // File location
-    UpdateFreq time.Duration // Update frequency
-    quitChan chan bool // Channel used to stop the background goroutine
-  }
-  CleanUp struct { //
-    Off bool // On or off (default false- on)
-    Thres time.Duration // Time before visitor expires and is removed
-    Freq time.Duration // Cleanup frequency
-    quitChan chan bool // Channel used to stop the background goroutine
-  }
+		On         bool          // On or off (default false- off)
+		Filename   string        // File location
+		UpdateFreq time.Duration // Update frequency (how often it reads file to check for changes; in minutes)
+		quitChan   chan bool     // Channel used to stop the background goroutine
+	}
+	Blacklist struct { // Blacklist settings
+		On         bool          // On or off (default false- off)
+		Filename   string        // File location
+		UpdateFreq time.Duration // Update frequency (in minutes)
+		quitChan   chan bool     // Channel used to stop the background goroutine
+	}
+	CleanUp struct { //
+		Off      bool          // On or off (default false- on)
+		Thres    time.Duration // Time before visitor expires and is removed (in minutes)
+		Freq     time.Duration // Cleanup frequency (in minutes)
+		quitChan chan bool     // Channel used to stop the background goroutine
+	}
+	visitors map[string]*visitor //Map to hold the visitor structs for each ip t
 }
-
-// Create a map to hold the visitor structs for each ip
-var visitors = make(map[string]*visitor)
 
 // Mutex for locking access to shared data structs
 var mtx sync.Mutex
@@ -58,7 +56,7 @@ var mtx sync.Mutex
 var whitelist = make([]string, 0)
 var blacklist = make([]string, 0)
 
-// Function to update whitelist to allow user access
+// Function to update whitelist from a file
 func (l *Limiter) updateWhitelist(quit chan bool) {
 	for {
 		select {
@@ -76,7 +74,7 @@ func (l *Limiter) updateWhitelist(quit chan bool) {
 	}
 }
 
-// Function to update blacklist to disallow user access
+// Function to update blacklist from a file
 func (l *Limiter) updateBlacklist(quit chan bool) {
 	for {
 		select {
@@ -104,24 +102,30 @@ func readList(loc string) (list []string, err error) {
 	return
 }
 
-// Creates a new rate limiter and adds it to the visitors map
-// with the IP address as the key.
+// Creates a new limiter and adds it to the visitors map
+// with the user's IP address as the key.
 func (l *Limiter) addVisitor(ip string) *rate.Limiter {
 	// Create a token bucket limiter that allows base querys/second or burst amount at once
 	limiter := rate.NewLimiter(l.Rate, l.Burst)
 	mtx.Lock()
-	// Include the current time when creating a new visitor for cleaning up.
-	visitors[ip] = &visitor{limiter, time.Now()}
+	l.visitors[ip] = &visitor{limiter, time.Now()}
 	mtx.Unlock()
 	return limiter
 }
 
-// Initialization function for exported limiter object
-// Uses the limiter's internal parameters to initialize
-// the appropriate background processes
-// If no limiter parameters have not been set then it
-// assumes default settings
+/*
+Initialization function for exported limiter object
+Uses the limiter's internal parameters to initialize
+the appropriate background processes
+If no limiter parameters have not been set then it assumes default settings:
+  - Whitelist and blacklist turned off
+  - CleanUp turned on at a freq and thres of 3 minutes
+  - Rate of 1 per second
+  - Bucket size (max burst) of 5
+*/
 func (l *Limiter) Init() (err error) {
+	mtx.Lock()
+	defer mtx.Unlock()
 	if l.Whitelist.On {
 		if l.Whitelist.Filename == "" {
 			err = errors.New("Whitelist configuration file path is not set")
@@ -172,14 +176,17 @@ func (l *Limiter) Init() (err error) {
 	if l.Burst == 0 {
 		l.Burst = 5
 	}
+	if l.visitors == nil {
+		l.visitors = make(map[string]*visitor)
+	}
 	return
 }
 
-// Check for current visior and return their rate limiter if it already exists
-// Otherwise call the addVisitor function to add a new visitor
+// Check for current visitor's rate limiter and return it if they have one
+// If they don't, call the addVisitor function to assign them a new limiter
 func (l *Limiter) getVisitor(ip string) *rate.Limiter {
 	mtx.Lock()
-	v, exists := visitors[ip]
+	v, exists := l.visitors[ip]
 	if !exists {
 		mtx.Unlock()
 		return l.addVisitor(ip)
@@ -190,19 +197,19 @@ func (l *Limiter) getVisitor(ip string) *rate.Limiter {
 	return v.limiter
 }
 
-// Every minute check the map for visitors that haven't been seen for
-// more than 3 minutes and delete the entries.
+// Every minute check the map for visitors that haven't been
+// seen for more than x minutes and remove them.
 func (l *Limiter) cleanupVisitors(quit chan bool) {
 	for {
 		select {
 		case <-quit:
 			return
 		default:
-			time.Sleep(l.CleanUp.Freq*time.Minute)
+			time.Sleep(l.CleanUp.Freq * time.Minute)
 			mtx.Lock()
-			for ip, v := range visitors {
+			for ip, v := range l.visitors {
 				if time.Now().Sub(v.lastSeen) > l.CleanUp.Thres*time.Minute {
-					delete(visitors, ip)
+					delete(l.visitors, ip)
 				}
 			}
 			mtx.Unlock()
@@ -210,10 +217,11 @@ func (l *Limiter) cleanupVisitors(quit chan bool) {
 	}
 }
 
-// Wrap this method around your server's handler function(s)
-// to check each incoming request's IP against their
-// limiter (or create a new one), and optionally an IP
-// whitelist and/or blacklist
+/*
+Wrap this method around a server's handler function(s)
+to check each incoming request's IP against their
+limiter, and optionally against an IP whitelist and/or blacklist
+*/
 func (l *Limiter) Limit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// If whitelist flag is set, check if incoming ip is on whitelist
