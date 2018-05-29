@@ -12,9 +12,9 @@ import "github.com/i-norden/httplimiter"
 
 **In main, instantiate a new limiter object and set desired parameters:**
 
-lim := httplimiter.Limiter
-lim.Whitelist.On = true
-lim.Whitelist.Filename = "./whitelist_filename"
+lim := httplimiter.Limiter <br />
+lim.Whitelist.On = true <br />
+lim.Whitelist.Filename = "./whitelist_filename" <br />
 lim.Whitelist.UpdateFreq = 5
 
 **Initiate the limiter's processes:**
