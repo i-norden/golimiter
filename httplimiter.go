@@ -4,7 +4,7 @@ Handling of X-Forwarded-For or X-Real-IP headers
 Reading white/blacklist from dbs
 Updating white/blacklist using rpc
 */
-package limiter
+package httplimiter
 
 import (
 	"errors"
@@ -33,12 +33,14 @@ type Limiter struct {
 		Filename   string        // File location
 		UpdateFreq time.Duration // Update frequency (how often it reads file to check for changes; in minutes)
 		quitChan   chan bool     // Channel used to stop the background goroutine
+		list       []string      // The whitelist as an array
 	}
 	Blacklist struct { // Blacklist settings
 		On         bool          // On or off (default false- off)
 		Filename   string        // File location
 		UpdateFreq time.Duration // Update frequency (in minutes)
 		quitChan   chan bool     // Channel used to stop the background goroutine
+		list       []string      // The blacklist as an array
 	}
 	CleanUp struct { //
 		Off      bool          // On or off (default false- on)
@@ -46,15 +48,11 @@ type Limiter struct {
 		Freq     time.Duration // Cleanup frequency (in minutes)
 		quitChan chan bool     // Channel used to stop the background goroutine
 	}
-	visitors map[string]*visitor //Map to hold the visitor structs for each ip t
+	visitors map[string]*visitor //Map to hold the visitor structs for each ip
 }
 
 // Mutex for locking access to shared data structs
 var mtx sync.Mutex
-
-// Create whitelist/blacklist to hold allowed/disallowed ip addresses
-var whitelist = make([]string, 0)
-var blacklist = make([]string, 0)
 
 // Function to update whitelist from a file
 func (l *Limiter) updateWhitelist(quit chan bool) {
@@ -66,7 +64,7 @@ func (l *Limiter) updateWhitelist(quit chan bool) {
 			mtx.Lock()
 			newList, err := readList(l.Whitelist.Filename)
 			if err == nil {
-				whitelist = newList
+				l.Whitelist.list = newList
 			}
 			mtx.Unlock()
 			time.Sleep(time.Minute * l.Whitelist.UpdateFreq)
@@ -84,7 +82,7 @@ func (l *Limiter) updateBlacklist(quit chan bool) {
 			mtx.Lock()
 			newList, err := readList(l.Blacklist.Filename)
 			if err == nil {
-				blacklist = newList
+				l.Blacklist.list = newList
 			}
 			mtx.Unlock()
 			time.Sleep(time.Minute * l.Blacklist.UpdateFreq)
@@ -98,19 +96,8 @@ func readList(loc string) (list []string, err error) {
 	if err != nil {
 		return
 	}
-	list = strings.Split(string(raw), "\r\n")
+	list = strings.Split(string(raw), "\n")
 	return
-}
-
-// Creates a new limiter and adds it to the visitors map
-// with the user's IP address as the key.
-func (l *Limiter) addVisitor(ip string) *rate.Limiter {
-	// Create a token bucket limiter that allows base querys/second or burst amount at once
-	limiter := rate.NewLimiter(l.Rate, l.Burst)
-	mtx.Lock()
-	l.visitors[ip] = &visitor{limiter, time.Now()}
-	mtx.Unlock()
-	return limiter
 }
 
 /*
@@ -197,6 +184,17 @@ func (l *Limiter) getVisitor(ip string) *rate.Limiter {
 	return v.limiter
 }
 
+// Creates a new limiter and adds it to the visitors map
+// with the user's IP address as the key.
+func (l *Limiter) addVisitor(ip string) *rate.Limiter {
+	// Create a token bucket limiter that allows base querys/second or burst amount at once
+	limiter := rate.NewLimiter(l.Rate, l.Burst)
+	mtx.Lock()
+	l.visitors[ip] = &visitor{limiter, time.Now()}
+	mtx.Unlock()
+	return limiter
+}
+
 // Every minute check the map for visitors that haven't been
 // seen for more than x minutes and remove them.
 func (l *Limiter) cleanupVisitors(quit chan bool) {
@@ -227,7 +225,7 @@ func (l *Limiter) Limit(next http.Handler) http.Handler {
 		// If whitelist flag is set, check if incoming ip is on whitelist
 		if l.Whitelist.On {
 			mtx.Lock()
-			in, _ := inArray(r.RemoteAddr, whitelist)
+			in, _ := inArray(r.RemoteAddr, l.Whitelist.list)
 			mtx.Unlock()
 			// If not on whitelist return 401 status
 			if !in {
@@ -238,7 +236,7 @@ func (l *Limiter) Limit(next http.Handler) http.Handler {
 		// If blacklist flag is set, check if incoming ip is on blacklist
 		if l.Blacklist.On {
 			mtx.Lock()
-			in, _ := inArray(r.RemoteAddr, blacklist)
+			in, _ := inArray(r.RemoteAddr, l.Blacklist.list)
 			mtx.Unlock()
 			// If on blacklist return 401 status
 			if in {
