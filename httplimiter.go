@@ -1,4 +1,5 @@
 /* TO DO:
+Add ability to blacklist bad actors (those that abuse api limit or otherwise)
 Adjust limits based on server load (internal balancer)
 Handling of X-Forwarded-For or X-Real-IP headers
 Reading white/blacklist from dbs
@@ -42,7 +43,7 @@ type Limiter struct {
 		quitChan   chan bool     // Channel used to stop the background goroutine
 		list       []string      // The blacklist as an array of disallowed ip address
 	}
-	CleanUp struct { // Background cleanup process settings
+	Cleanup struct { // Background cleanup process settings
 		Off      bool          // On or off (default false- on)
 		Thres    time.Duration // Time before visitor expires and is removed (in minutes)
 		Freq     time.Duration // Cleanup frequency (in minutes)
@@ -59,6 +60,7 @@ func (l *Limiter) updateWhitelist(quit chan bool) {
 	for {
 		select {
 		case <-quit:
+			l.Whitelist.On = false
 			return
 		default:
 			mtx.Lock()
@@ -77,6 +79,7 @@ func (l *Limiter) updateBlacklist(quit chan bool) {
 	for {
 		select {
 		case <-quit:
+			l.Blacklist.On = false
 			return
 		default:
 			mtx.Lock()
@@ -106,64 +109,75 @@ Uses the limiter's internal parameters to initialize
 the appropriate background processes
 If no limiter parameters have not been set then it assumes default settings:
   - Whitelist and blacklist turned off
-  - CleanUp turned on at a freq and thres of 3 minutes
+  - Cleanup turned on at a freq and thres of 3 minutes
   - Rate of 1 per second
   - Bucket size (max burst) of 5
 */
 func (l *Limiter) Init() (err error) {
 	mtx.Lock()
 	defer mtx.Unlock()
-	if l.Whitelist.On {
-		if l.Whitelist.Filename == "" {
+	if l.Whitelist.On { // If using whitelist, read in list and initialize update process
+		if l.Whitelist.Filename == "" { // Return error if no file path is given
 			err = errors.New("Whitelist configuration file path is not set")
 			return
 		}
 		_, err = readList(l.Whitelist.Filename)
-		if err != nil {
+		if err != nil { // Return error if list can't be read in
 			return
 		}
 		if l.Whitelist.UpdateFreq == 0 {
-			l.Whitelist.UpdateFreq = 3
+			l.Whitelist.UpdateFreq = 3 // Use default freq if none provided
 		}
 		var qWL chan bool
 		go l.updateWhitelist(qWL)
 		l.Whitelist.quitChan = qWL
 	}
-	if l.Blacklist.On {
-		if l.Blacklist.Filename == "" {
-			l.Whitelist.quitChan <- true
+
+	if l.Blacklist.On { // If using blacklist, read in list and initialize update process
+		if l.Blacklist.Filename == "" { // Return error if no file path is given
+			if l.Whitelist.On {
+				l.Whitelist.On = false
+				l.Whitelist.quitChan <- true // and shut down whitelist process if it exists
+			}
 			return errors.New("Blacklist configuration file path is not set")
 		}
 		_, err = readList(l.Blacklist.Filename)
-		if err != nil {
-			l.Whitelist.quitChan <- true
+		if err != nil { // Return error if list can't be read in
+			if l.Whitelist.On {
+				l.Whitelist.On = false
+				l.Whitelist.quitChan <- true // and shut down whitelist process if it exists
+			}
 			return
 		}
 		if l.Blacklist.UpdateFreq == 0 {
-			l.Blacklist.UpdateFreq = 3
+			l.Blacklist.UpdateFreq = 3 // Use default freq if none provided
 		}
 		var qBL chan bool
 		go l.updateBlacklist(qBL)
 		l.Blacklist.quitChan = qBL
 	}
-	if !l.CleanUp.Off {
-		if l.CleanUp.Freq == 0 {
-			l.CleanUp.Freq = 3
+
+	if !l.Cleanup.Off { // Visitor cleanup is on by default
+		if l.Cleanup.Freq == 0 {
+			l.Cleanup.Freq = 3 // Use default freq if none provided
 		}
-		if l.CleanUp.Thres == 0 {
-			l.CleanUp.Thres = 3
+		if l.Cleanup.Thres == 0 {
+			l.Cleanup.Thres = 3 // Use default thres if none provided
 		}
 		var qCU chan bool
 		go l.cleanupVisitors(qCU)
-		l.CleanUp.quitChan = qCU
+		l.Cleanup.quitChan = qCU
 	}
+
 	if l.Rate == 0 {
-		l.Rate = 1
+		l.Rate = 1 // Use default rate if none provided
 	}
+
 	if l.Burst == 0 {
-		l.Burst = 5
+		l.Burst = 5 // Use default burst if none provided
 	}
-	if l.visitors == nil {
+
+	if l.visitors == nil { // Initialize visitors map if none exists
 		l.visitors = make(map[string]*visitor)
 	}
 	return
@@ -173,14 +187,13 @@ func (l *Limiter) Init() (err error) {
 // If they don't, call the addVisitor function to assign them a new limiter
 func (l *Limiter) getVisitor(ip string) *rate.Limiter {
 	mtx.Lock()
+	defer mtx.Unlock()
 	v, exists := l.visitors[ip]
 	if !exists {
-		mtx.Unlock()
 		return l.addVisitor(ip)
 	}
 	// Update the last seen time for the visitor.
 	v.lastSeen = time.Now()
-	mtx.Unlock()
 	return v.limiter
 }
 
@@ -203,10 +216,10 @@ func (l *Limiter) cleanupVisitors(quit chan bool) {
 		case <-quit:
 			return
 		default:
-			time.Sleep(l.CleanUp.Freq * time.Minute)
+			time.Sleep(l.Cleanup.Freq * time.Minute)
 			mtx.Lock()
 			for ip, v := range l.visitors {
-				if time.Now().Sub(v.lastSeen) > l.CleanUp.Thres*time.Minute {
+				if time.Now().Sub(v.lastSeen) > l.Cleanup.Thres*time.Minute {
 					delete(l.visitors, ip)
 				}
 			}

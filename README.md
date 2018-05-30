@@ -34,16 +34,16 @@ err := lim.Init()
 **And wrap its limit method around your http handler function:**
 
 ```
-http.ListenAndServe(":8080", lim.Limit(http.HandlerFunc(yourHandlerFunc)))
+http.ListenAndServe(":443", lim.Limit(http.HandlerFunc(yourHandlerFunc)))
 ```
 
 Note that white/blacklist files currently need to be in the form <br />
 of a newline ("\n") delimitated list of the IP address strings
 
 Also note that the white/blacklists and the list of visitors with their
-associated limiters are internal to a limiter instance. That is, two distinct
+associated limiters are internal to a limiter so two distinct
 limiter objects will enforce their own limitations completely independent of
-one another. So you can reuse the same limiter on different handler functions
+one another. You can reuse the same limiter on different handler functions
 if you want to enforce shared api limitations across all of them or instantiate
 different limiters to impose separate limitations on each handler
 

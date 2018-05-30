@@ -1,9 +1,9 @@
 /* TO DO
 Finish current state of things
+Add ability to blacklist bad actors (those that abuse api limit or otherwise)
 Enable custom number of threshold/limits
 Refine metric used to define and  measure server load
 */
-
 
 package httplimiter
 
@@ -23,23 +23,23 @@ import (
 type balancer struct { // Whitelist settings
 	Limits struct { // Limiter conditions enforced for visitors at each if the server load states
 		Low struct { // Limiter params used during "normal" load (aka load that doesn't surpass med or high thresholds)
-			Rate      rate.Limit
-			Burst     int
+			Rate  rate.Limit
+			Burst int
 		}
 		Med struct { // Limiter params used during medium load
-			Rate      rate.Limit
-			Burst     int
+			Rate  rate.Limit
+			Burst int
 		}
 		High struct { // Limiter params used during high load
-			Rate      rate.Limit
-			Burst     int
+			Rate  rate.Limit
+			Burst int
 		}
 	}
 	triggers struct { // Limiters used to trigger load state shift (defualt is low)
-		med       *rate.Limiter // Exhausting this limiter will set server load state to medium
-		high      *rate.Limiter // Exhausting this limiter will set server load state to high
+		med  *rate.Limiter // Exhausting this limiter will set server load state to medium
+		high *rate.Limiter // Exhausting this limiter will set server load state to high
 	}
-	Whitelist struct {      // Whitelist settings
+	Whitelist struct { // Whitelist settings
 		On         bool          // On or off (default false- off)
 		Filename   string        // File location
 		UpdateFreq time.Duration // Update frequency (how often it reads file to check for changes; in minutes)
