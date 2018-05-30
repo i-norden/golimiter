@@ -17,7 +17,7 @@ import "github.com/i-norden/httplimiter"
 # The below creates a limiter that applies a whitelist and allows permitted
 # users 1 api call per second with burst up to 6 per second
 
-lim := httplimiter.Limiter
+lim := httplimiter.Limiter{}
 lim.Rate = 1                                        # rate at which bucket refills
 lim.Burst = 6                                       # size of the bucket
 lim.Whitelist.On = true                             # turn whitelisting on

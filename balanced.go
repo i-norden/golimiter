@@ -1,3 +1,10 @@
+/* TO DO
+Finish current state of things
+Enable custom number of threshold/limits
+Refine metric used to define and  measure server load
+*/
+
+
 package httplimiter
 
 import (
@@ -13,9 +20,25 @@ import (
 // Structs for internal load balancing
 // that adjusts api limits according to overall demand
 // Balancer is used to rate the server's aggregated load
-type balancer struct {
-	med       *rate.Limiter // Trigger to set server load state to medium
-	high      *rate.Limiter // Trigger to set server load state to high
+type balancer struct { // Whitelist settings
+	Limits struct { // Limiter conditions enforced for visitors at each if the server load states
+		Low struct { // Limiter params used during "normal" load (aka load that doesn't surpass med or high thresholds)
+			Rate      rate.Limit
+			Burst     int
+		}
+		Med struct { // Limiter params used during medium load
+			Rate      rate.Limit
+			Burst     int
+		}
+		High struct { // Limiter params used during high load
+			Rate      rate.Limit
+			Burst     int
+		}
+	}
+	triggers struct { // Limiters used to trigger load state shift (defualt is low)
+		med       *rate.Limiter // Exhausting this limiter will set server load state to medium
+		high      *rate.Limiter // Exhausting this limiter will set server load state to high
+	}
 	Whitelist struct {      // Whitelist settings
 		On         bool          // On or off (default false- off)
 		Filename   string        // File location
@@ -30,7 +53,7 @@ type balancer struct {
 		quitChan   chan bool     // Channel used to stop the background goroutine
 		list       []string      // The blacklist as an array
 	}
-	CleanUp struct { //
+	CleanUp struct { // Background cleanup process settings
 		Off      bool          // On or off (default false- on)
 		Thres    time.Duration // Time before visitor expires and is removed (in minutes)
 		Freq     time.Duration // Cleanup frequency (in minutes)
@@ -58,13 +81,31 @@ type state struct {
 // Mutex for locking access to shared data structs
 var mtx sync.Mutex
 
+// State variale to represent server load
 var load state
 
-// Create and return a new balancer
-func NewBalancer(med, high int) *balancer {
+/*
+Used to create and return a new balancer
+
+suppose you have a server that can support 10k users each at an
+api limit of 1/second w/ bursts up to 6. Thats an expected load of
+10,000/second w/burst up to 60,000/second.
+If suddenly the number of users surges, in an attempt to maintain the same
+overall load we can cut the visitors' allowed rates and bursts accordingly
+
+E.g. to respond to a 2x or 10x increase in demand
+we can acheive this by creating a balancer with a "med" limiter at
+a rate 10,000 and buckset size of 60,000, and a "high" limiter at
+a rate of 100,000 and size of 600,000. Every incoming api request handled
+by the balancer drains from these limiters, and exhausting their buckets
+causes the visitors to switch which limiter they use
+(from the default "low" one to the "med" or "high" one) which are defined
+during ... (still need to write that func)
+*/
+func NewBalancer(medRate, highRate rate.Limit, medBktSize, lrgBktSize int) *balancer {
 	var bal balancer
-	bal.med = rate.NewLimiter(1, med)
-	bal.high = rate.NewLimiter(1, high)
+	bal.triggers.med = rate.NewLimiter(medRate, medBktSize)
+	bal.triggers.high = rate.NewLimiter(highRate, lrgBktSize)
 	return &bal
 }
 
@@ -72,10 +113,10 @@ func NewBalancer(med, high int) *balancer {
 func (b *balancer) update() {
 	mtx.Lock()
 	load.set("low")
-	if b.med.Allow() == false {
+	if b.triggers.med.Allow() == false {
 		load.set("med")
 	}
-	if b.high.Allow() == false {
+	if b.triggers.high.Allow() == false {
 		load.set("high")
 	}
 	mtx.Unlock()

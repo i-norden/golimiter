@@ -33,16 +33,16 @@ type Limiter struct {
 		Filename   string        // File location
 		UpdateFreq time.Duration // Update frequency (how often it reads file to check for changes; in minutes)
 		quitChan   chan bool     // Channel used to stop the background goroutine
-		list       []string      // The whitelist as an array
+		list       []string      // The whitelist as an array of allowed ip addresses
 	}
 	Blacklist struct { // Blacklist settings
 		On         bool          // On or off (default false- off)
 		Filename   string        // File location
 		UpdateFreq time.Duration // Update frequency (in minutes)
 		quitChan   chan bool     // Channel used to stop the background goroutine
-		list       []string      // The blacklist as an array
+		list       []string      // The blacklist as an array of disallowed ip address
 	}
-	CleanUp struct { //
+	CleanUp struct { // Background cleanup process settings
 		Off      bool          // On or off (default false- on)
 		Thres    time.Duration // Time before visitor expires and is removed (in minutes)
 		Freq     time.Duration // Cleanup frequency (in minutes)
