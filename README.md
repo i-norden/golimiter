@@ -34,7 +34,7 @@ err := lim.Init()
 **And wrap it's limit method around your http handler function:**
 
 ```
-http.ListenAndServe(":8080", lim.Limit(http.HandlerFunc(yourCustomHandlerFunc)))
+http.ListenAndServe(":8080", lim.Limit(http.HandlerFunc(yourHandlerFunc)))
 ```
 
 Note that white/blacklist files currently need to be in the form <br />

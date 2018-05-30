@@ -1,11 +1,11 @@
 package httplimiter
 
 import (
+	"errors"
 	"io/ioutil"
 	"strings"
 	"sync"
 	"time"
-	"errors"
 
 	"golang.org/x/time/rate"
 )
@@ -14,44 +14,44 @@ import (
 // that adjusts api limits according to overall demand
 // Balancer is used to rate the server's aggregated load
 type balancer struct {
-		med *rate.Limiter // Trigger to set server load state to medium
-		high *rate.Limiter // Trigger to set server load state to high
-		Whitelist struct { // Whitelist settings
-			On         bool          // On or off (default false- off)
-			Filename   string        // File location
-			UpdateFreq time.Duration // Update frequency (how often it reads file to check for changes; in minutes)
-			quitChan   chan bool     // Channel used to stop the background goroutine
-	    list       []string      // The whitelist as an array
-		}
-		Blacklist struct { // Blacklist settings
-			On         bool          // On or off (default false- off)
-			Filename   string        // File location
-			UpdateFreq time.Duration // Update frequency (in minutes)
-			quitChan   chan bool     // Channel used to stop the background goroutine
-	    list       []string      // The blacklist as an array
-		}
-		CleanUp struct { //
-			Off      bool          // On or off (default false- on)
-			Thres    time.Duration // Time before visitor expires and is removed (in minutes)
-			Freq     time.Duration // Cleanup frequency (in minutes)
-			quitChan chan bool     // Channel used to stop the background goroutine
-		}
-		visitors map[string]*visitor // Map to hold the visitor structs for each ip
+	med       *rate.Limiter // Trigger to set server load state to medium
+	high      *rate.Limiter // Trigger to set server load state to high
+	Whitelist struct {      // Whitelist settings
+		On         bool          // On or off (default false- off)
+		Filename   string        // File location
+		UpdateFreq time.Duration // Update frequency (how often it reads file to check for changes; in minutes)
+		quitChan   chan bool     // Channel used to stop the background goroutine
+		list       []string      // The whitelist as an array
 	}
+	Blacklist struct { // Blacklist settings
+		On         bool          // On or off (default false- off)
+		Filename   string        // File location
+		UpdateFreq time.Duration // Update frequency (in minutes)
+		quitChan   chan bool     // Channel used to stop the background goroutine
+		list       []string      // The blacklist as an array
+	}
+	CleanUp struct { //
+		Off      bool          // On or off (default false- on)
+		Thres    time.Duration // Time before visitor expires and is removed (in minutes)
+		Freq     time.Duration // Cleanup frequency (in minutes)
+		quitChan chan bool     // Channel used to stop the background goroutine
+	}
+	visitors map[string]*visitor // Map to hold the visitor structs for each ip
+}
 
 // Class of visitor with limiter settins for differ load conditions
 type visitor struct {
 	limiters struct {
-		low *rate.Limiter
-		med *rate.Limiter
+		low  *rate.Limiter
+		med  *rate.Limiter
 		high *rate.Limiter
 	}
 	lastSeen time.Time
 }
 
 type state struct {
-	low bool
-	med bool
+	low  bool
+	med  bool
 	high bool
 }
 
@@ -70,14 +70,14 @@ func NewBalancer(med, high int) *balancer {
 
 // Update state variable based on balancers global limiter states
 func (b *balancer) update() {
-  mtx.Lock()
+	mtx.Lock()
 	load.set("low")
 	if b.med.Allow() == false {
 		load.set("med")
-  }
+	}
 	if b.high.Allow() == false {
 		load.set("high")
-  }
+	}
 	mtx.Unlock()
 }
 
@@ -117,7 +117,7 @@ func (s *state) set(state string) (err error) {
 		s.high = true
 		return
 	}
-  err = errors.New("Invalid state")
+	err = errors.New("Invalid state")
 	return
 }
 
@@ -139,7 +139,7 @@ func (v *visitor) Allow() bool {
 
 // Function to initialize the internal balancer
 func (b *balancer) Init() (err error) {
-  return err
+	return err
 }
 
 // Check for current visitor's rate limiter and return it if they have one
