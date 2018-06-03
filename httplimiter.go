@@ -167,7 +167,7 @@ func (l *Limiter) Limit(next http.Handler) http.Handler {
 		// the rate limiter for the current user.
 		user := l.getVisitor(r.RemoteAddr)
 		// If they have exceeded their limit, return 429 status
-		if user.Allow() == false {
+		if !user.Allow() {
 			http.Error(w, http.StatusText(429), http.StatusTooManyRequests)
 			return
 		}
