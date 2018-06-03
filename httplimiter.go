@@ -232,7 +232,7 @@ func (l *Limiter) updateWhitelist(quit chan bool) {
 			mtx.Lock()
 			newList, err := c.ReadList(l.Whitelist.Filename)
 			if err == nil {
-				l.Whitelist.list = c.newList
+				l.Whitelist.list = newList
 			}
 			mtx.Unlock()
 			time.Sleep(time.Minute * l.Whitelist.UpdateFreq)
@@ -251,7 +251,7 @@ func (l *Limiter) updateBlacklist(quit chan bool) {
 			mtx.Lock()
 			newList, err := c.ReadList(l.Blacklist.Filename)
 			if err == nil {
-				l.Blacklist.list = c.newList
+				l.Blacklist.list = newList
 			}
 			mtx.Unlock()
 			time.Sleep(time.Minute * l.Blacklist.UpdateFreq)

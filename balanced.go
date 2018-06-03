@@ -20,11 +20,11 @@ import (
 // that adjusts api limits according to overall demand
 // Balancer is used to rate the server's aggregated load
 type Balancer struct { // Whitelist settings
-	Rate rate.Limit // Default limiter rate
-	Burst int // Default limiter burst/bucket size
-	params map[string]params // Limiter params enforced at user defined thresholds
-	triggers map[string]*rate.Limiter // User defined limiters to monitor load and trigger state shift
-	Whitelist struct { // Whitelist settings
+	Rate      rate.Limit               // Default limiter rate
+	Burst     int                      // Default limiter burst/bucket size
+	params    map[string]params        // Limiter params enforced at user defined thresholds
+	triggers  map[string]*rate.Limiter // User defined limiters to monitor load and trigger state shift
+	Whitelist struct {                 // Whitelist settings
 		On         bool          // On or off (default false- off)
 		Filename   string        // File location
 		UpdateFreq time.Duration // Update frequency (how often it reads file to check for changes; in minutes)
@@ -45,13 +45,13 @@ type Balancer struct { // Whitelist settings
 		quitChan chan bool     // Channel used to stop the background goroutine
 	}
 	visitors map[string]*visitor // Map to hold the visitor structs for each ip
-	states []string // possible states
-	state string  // state variable for the balancer
+	states   []string            // possible states
+	state    string              // state variable for the balancer
 }
 
 // Class of visitor with limiter settings for default and user defined load conditions
 type visitor struct {
-	limiter *rate.Limiter //limiter use under default conditions
+	limiter  *rate.Limiter            //limiter use under default conditions
 	limiters map[string]*rate.Limiter //limiters used under variable load conditions
 	lastSeen time.Time
 }
