@@ -8,10 +8,9 @@ Updating white/blacklist using rpc
 package httplimiter
 
 import (
+	c "./common"
 	"errors"
-	"io/ioutil"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -19,7 +18,7 @@ import (
 )
 
 // Struct which holds the rate limiter for each
-// visitor and the last time that the visitor was seen.
+// visitor and the last time that the visitor was seen
 type visitor struct {
 	limiter  *rate.Limiter // Leaky-bucket limiter object
 	lastSeen time.Time     // So that we know when to cleanup visitor
@@ -55,59 +54,11 @@ type Limiter struct {
 // Mutex for locking access to shared data structs
 var mtx sync.Mutex
 
-// Function to update whitelist from a file
-func (l *Limiter) updateWhitelist(quit chan bool) {
-	for {
-		select {
-		case <-quit:
-			l.Whitelist.On = false
-			return
-		default:
-			mtx.Lock()
-			newList, err := readList(l.Whitelist.Filename)
-			if err == nil {
-				l.Whitelist.list = newList
-			}
-			mtx.Unlock()
-			time.Sleep(time.Minute * l.Whitelist.UpdateFreq)
-		}
-	}
-}
-
-// Function to update blacklist from a file
-func (l *Limiter) updateBlacklist(quit chan bool) {
-	for {
-		select {
-		case <-quit:
-			l.Blacklist.On = false
-			return
-		default:
-			mtx.Lock()
-			newList, err := readList(l.Blacklist.Filename)
-			if err == nil {
-				l.Blacklist.list = newList
-			}
-			mtx.Unlock()
-			time.Sleep(time.Minute * l.Blacklist.UpdateFreq)
-		}
-	}
-}
-
-// Function for reading in newline delimited list from file
-func readList(loc string) (list []string, err error) {
-	raw, err := ioutil.ReadFile(loc)
-	if err != nil {
-		return
-	}
-	list = strings.Split(string(raw), "\n")
-	return
-}
-
 /*
 Initialization function for exported limiter object
 Uses the limiter's internal parameters to initialize
 the appropriate background processes
-If no limiter parameters have not been set then it assumes default settings:
+If  limiter parameters have not been set then it assumes default settings:
   - Whitelist and blacklist turned off
   - Cleanup turned on at a freq and thres of 3 minutes
   - Rate of 1 per second
@@ -121,7 +72,7 @@ func (l *Limiter) Init() (err error) {
 			err = errors.New("Whitelist configuration file path is not set")
 			return
 		}
-		_, err = readList(l.Whitelist.Filename)
+		_, err = c.ReadList(l.Whitelist.Filename)
 		if err != nil { // Return error if list can't be read in
 			return
 		}
@@ -141,7 +92,7 @@ func (l *Limiter) Init() (err error) {
 			}
 			return errors.New("Blacklist configuration file path is not set")
 		}
-		_, err = readList(l.Blacklist.Filename)
+		_, err = c.ReadList(l.Blacklist.Filename)
 		if err != nil { // Return error if list can't be read in
 			if l.Whitelist.On {
 				l.Whitelist.On = false
@@ -181,6 +132,48 @@ func (l *Limiter) Init() (err error) {
 		l.visitors = make(map[string]*visitor)
 	}
 	return
+}
+
+/*
+Wrap this method around a server's handler function(s)
+to check each incoming request's IP against their
+limiter, and optionally against an IP whitelist and/or blacklist
+*/
+func (l *Limiter) Limit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// If whitelist flag is set, check if incoming ip is on whitelist
+		if l.Whitelist.On {
+			mtx.Lock()
+			in, _ := c.InArray(r.RemoteAddr, l.Whitelist.list)
+			mtx.Unlock()
+			// If not on whitelist return 401 status
+			if !in {
+				http.Error(w, http.StatusText(401), http.StatusUnauthorized)
+				return
+			}
+		}
+		// If blacklist flag is set, check if incoming ip is on blacklist
+		if l.Blacklist.On {
+			mtx.Lock()
+			in, _ := c.InArray(r.RemoteAddr, l.Blacklist.list)
+			mtx.Unlock()
+			// If on blacklist return 401 status
+			if in {
+				http.Error(w, http.StatusText(401), http.StatusUnauthorized)
+				return
+			}
+		}
+		// Call the getVisitor method to create or retreive
+		// the rate limiter for the current user.
+		user := l.getVisitor(r.RemoteAddr)
+		// If they have exceeded their limit, return 429 status
+		if user.Allow() == false {
+			http.Error(w, http.StatusText(429), http.StatusTooManyRequests)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Check for current visitor's rate limiter and return it if they have one
@@ -228,55 +221,40 @@ func (l *Limiter) cleanupVisitors(quit chan bool) {
 	}
 }
 
-/*
-Wrap this method around a server's handler function(s)
-to check each incoming request's IP against their
-limiter, and optionally against an IP whitelist and/or blacklist
-*/
-func (l *Limiter) Limit(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// If whitelist flag is set, check if incoming ip is on whitelist
-		if l.Whitelist.On {
-			mtx.Lock()
-			in, _ := inArray(r.RemoteAddr, l.Whitelist.list)
-			mtx.Unlock()
-			// If not on whitelist return 401 status
-			if !in {
-				http.Error(w, http.StatusText(401), http.StatusUnauthorized)
-				return
-			}
-		}
-		// If blacklist flag is set, check if incoming ip is on blacklist
-		if l.Blacklist.On {
-			mtx.Lock()
-			in, _ := inArray(r.RemoteAddr, l.Blacklist.list)
-			mtx.Unlock()
-			// If on blacklist return 401 status
-			if in {
-				http.Error(w, http.StatusText(401), http.StatusUnauthorized)
-				return
-			}
-		}
-		// Call the getVisitor method to create or retreive
-		// the rate limiter for the current user.
-		user := l.getVisitor(r.RemoteAddr)
-		// If they have exceeded their limit, return 429 status
-		if user.Allow() == false {
-			http.Error(w, http.StatusText(429), http.StatusTooManyRequests)
+// Function to update whitelist from a file
+func (l *Limiter) updateWhitelist(quit chan bool) {
+	for {
+		select {
+		case <-quit:
+			l.Whitelist.On = false
 			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
-}
-
-// Common function to check if string is in array
-func inArray(val string, array []string) (exists bool, index int) {
-	exists = false
-	for i, v := range array {
-		if val == v {
-			return true, i
+		default:
+			mtx.Lock()
+			newList, err := c.ReadList(l.Whitelist.Filename)
+			if err == nil {
+				l.Whitelist.list = c.newList
+			}
+			mtx.Unlock()
+			time.Sleep(time.Minute * l.Whitelist.UpdateFreq)
 		}
 	}
-	return
+}
+
+// Function to update blacklist from a file
+func (l *Limiter) updateBlacklist(quit chan bool) {
+	for {
+		select {
+		case <-quit:
+			l.Blacklist.On = false
+			return
+		default:
+			mtx.Lock()
+			newList, err := c.ReadList(l.Blacklist.Filename)
+			if err == nil {
+				l.Blacklist.list = c.newList
+			}
+			mtx.Unlock()
+			time.Sleep(time.Minute * l.Blacklist.UpdateFreq)
+		}
+	}
 }
