@@ -1,6 +1,10 @@
 # httplimiter
 
-WORK IN PROGRESS
+A leaky-bucket based http limiter that can implement <br />
+whitelisting, blacklisting, and enforce different rate <br />
+limitations in response to changes in overall api demand
+
+Still a work in progress
 
 ## Install
 
@@ -37,14 +41,14 @@ err := lim.Init()
 http.ListenAndServe(":443", lim.LimitHandler(http.HandlerFunc(yourHandlerFunc)))
 ```
 
-**Or its LimitFunc method around around a handler function:**
+**Or its LimitFunc method around a handler function:**
 
 ```
 http.ListenAndServe(":443", lim.LimitFunc(yourHandlerFunc))
 ```
 
-**Experimental feature**
-**Add universal request thresholds to the limiter and define new rate**
+**Experimental feature** <br />
+**Add universal request thresholds to the limiter and define new rate** <br />
 **restrictions to enforce when they are surpassed in attempt to balance load**
 
 ```
@@ -57,9 +61,9 @@ http.ListenAndServe(":443", lim.LimitFunc(yourHandlerFunc))
 lim.AddState(0, 5000, 3, 10)
 
 # You can add as many states as you like, but be sure to specify
-# their ordering using the first (int) argument to the AddState
-# method when multiple thresholds are simultaneously surpassed
-# the highest order state becomes the active one
+# their ordering using the first (int) argument to the AddState method
+# When multiple thresholds are simultaneously surpassed
+# the highest order limiter state becomes the active one
 
 lim.AddState(1, 10000, 1, 5)
 lim.AddState(2, 20000, 0.5, 2)
@@ -68,11 +72,11 @@ lim.AddState(2, 20000, 0.5, 2)
 Note that white/blacklist files currently need to be in the form <br />
 of a newline ("\n") delimitated list of the IP address strings
 
-Also note that the white/blacklists and the list of visitors with their
-associated limiters are internal to a limiter so two distinct
-limiter objects will enforce their own limitations completely independent of
-one another. You can reuse the same limiter on different handler functions
-if you want to enforce shared api limitations across all of them or instantiate
+Also note that the white/blacklists and the list of visitors with their <br />
+associated limiters are internal to a limiter so two distinct <br />
+limiter objects will enforce their own limitations completely independent of <br />
+one another. You can reuse the same limiter on different handler functions <br />
+if you want to enforce shared api limitations across all of them or instantiate <br />
 different limiters to impose separate limitations on each handler
 
 ## License
