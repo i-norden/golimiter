@@ -1,8 +1,8 @@
 # httplimiter
 
-A leaky-bucket based http limiter that can implement <br />
-whitelisting, blacklisting, and enforce different rate <br />
-limitations in response to changes in overall api demand
+A leaky-bucket based http limiter that can implement whitelisting,
+blacklisting, and enforce different rate limitations in response
+to changes in overall api demand
 
 Still a work in progress
 
@@ -69,14 +69,14 @@ lim.AddState(1, 10000, 1, 5)
 lim.AddState(2, 20000, 0.5, 2)
 ```
 
-Note that white/blacklist files currently need to be in the form <br />
+Note that white/blacklist files currently need to be in the form
 of a newline ("\n") delimitated list of the IP address strings
 
-Also note that the white/blacklists and the list of visitors with their <br />
-associated limiters are internal to a limiter so two distinct <br />
-limiter objects will enforce their own limitations completely independent of <br />
-one another. You can reuse the same limiter on different handler functions <br />
-if you want to enforce shared api limitations across all of them or instantiate <br />
+Also note that the white/blacklists and the list of visitors with their
+associated limiters are internal to a limiter so two distinct
+limiter objects will enforce their own limitations completely independent of
+one another. You can reuse the same limiter on different handler functions
+if you want to enforce shared api limitations across all of them or instantiate
 different limiters to impose separate limitations on each handler
 
 ## License
