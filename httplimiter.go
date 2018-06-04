@@ -10,7 +10,7 @@ Updating white/blacklist using rpc
 package httplimiter
 
 import (
-	c "./common"
+	c "github.com/i-norden/httplimiter/common"
 	"errors"
 	"net/http"
 	"sync"
