@@ -8,12 +8,12 @@ Still a work in progress
 
 ## Install
 
-go get github.com/i-norden/httplimiter
+go get github.com/i-norden/golimiter
 
 ## Usage
 
 ```
-import "github.com/i-norden/httplimiter"
+import "github.com/i-norden/golimiter"
 ```
 
 **Instantiate a new limiter object and set desired parameters:**
@@ -21,7 +21,7 @@ import "github.com/i-norden/httplimiter"
 # The below creates a limiter that applies a whitelist and allows permitted
 # users 1 api call per second with burst up to 6 per second
 
-lim := httplimiter.Limiter{}
+lim := golimiter.Limiter{}
 lim.Rate = 5                                        # rate at which bucket refills
 lim.Burst = 15                                      # size of the bucket
 lim.Whitelist.On = true                             # turn whitelisting on

@@ -11,10 +11,10 @@ Updating white/blacklist using rpc
 package golimiter
 
 import (
-	c "github.com/i-norden/golimiter/common"
 	"errors"
-	"net/http"
+	c "github.com/i-norden/golimiter/common"
 	"net"
+	"net/http"
 	"sync"
 	"time"
 
@@ -148,7 +148,6 @@ func (l *Limiter) Init() (err error) {
 	l.useDefault = true
 	return
 }
-
 
 // Wrap this middleware method around a server's handler struct(s)
 // to check each incoming request's IP against their
