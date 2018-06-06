@@ -35,16 +35,28 @@ lim.Whitelist.UpdateFreq = 5                        # whitelist read frequency
 err := lim.Init()
 ```
 
-**And wrap its LimitHandler method around an http.Handler:**
+**And wrap its LimitHTTPHandler method around an http.Handler:**
 
 ```
-http.ListenAndServe(":443", lim.LimitHandler(http.HandlerFunc(yourHandlerFunc)))
+http.ListenAndServe(":443", lim.LimitHTTPHandler(http.HandlerFunc(yourHandlerFunc)))
 ```
 
-**Or its LimitFunc method around a handler function:**
+**Or its LimitHTTPFunc method around an http handler function:**
 
 ```
-http.ListenAndServe(":443", lim.LimitFunc(yourHandlerFunc))
+http.ListenAndServe(":443", lim.LimitHTTPFunc(yourHandlerFunc))
+
+# In both above cases, yourHandlerFunc is of type func(http.ResponseWriter, *http.Request)
+```
+
+**Or use LimitNetConn to limit a lower level net connection:**
+
+```
+ln, _ := net.Listen(CONN_TYPE, CONN_HOST+":"+CONN_PORT)
+conn, _ := ln.Accept()
+go lim.LimitNetConn(conn, yourHandlerFunc)
+
+# In this case, yourHandlerFunc is of the type: func(conn net.Conn)
 ```
 
 **Experimental feature** <br />
