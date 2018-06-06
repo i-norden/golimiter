@@ -1,6 +1,6 @@
-# httplimiter
+# golimiter
 
-A leaky-bucket based http limiter that can implement whitelisting,
+A leaky-bucket based net/http limiter that can implement whitelisting,
 blacklisting, and enforce different rate limitations in response
 to changes in overall api demand
 

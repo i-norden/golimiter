@@ -1,5 +1,6 @@
 /* TO DO
 Write and perform proper tests
+Add ability to preferentialy treat certain vistors/ips (give them better rates)
 Add ability to add bad actors to blacklist/remove from whitelist on the go
 Refine metric used to define and  measure server load
 Handling of X-Forwarded-For or X-Real-IP headers
@@ -7,21 +8,19 @@ Reading white/blacklist from dbs
 Updating white/blacklist using rpc
 */
 
-package httplimiter
+package golimiter
 
 import (
-	c "github.com/i-norden/httplimiter/common"
+	c "github.com/i-norden/golimiter/common"
 	"errors"
 	"net/http"
+	"net"
 	"sync"
 	"time"
 
 	"golang.org/x/time/rate"
 )
 
-// Structs for internal load balancing
-// that adjusts api limits according to overall demand
-// Balancer is used to rate the server's aggregated load
 type Limiter struct { // Whitelist settings
 	Rate      rate.Limit      // Default limiter rate
 	Burst     int             // Default limiter burst/bucket size
@@ -49,12 +48,12 @@ type Limiter struct { // Whitelist settings
 	}
 	visitors   map[string]*visitor // Map to hold the visitor structs for each ip
 	useDefault bool                // bool indicating whether or not to use default params
-	state      int                 // state variable for the balancer
+	state      int                 // state variable for the limiter
 }
 
 // Class of visitor with limiter settings for default and user defined load conditions
 type visitor struct {
-	limiter  *rate.Limiter   //limiter use under default conditions
+	limiter  *rate.Limiter   //limiter used under default conditions
 	limiters []*rate.Limiter //limiters used under variable load conditions
 	lastSeen time.Time
 }
@@ -69,7 +68,7 @@ type params struct {
 var mtx sync.Mutex
 
 /*
-Initialization function for exported balancer object
+Initialization function for exported limiter object
 Uses the limiter's internal parameters to initialize
 the appropriate background processes
 If limiter parameters have been set then it assumes default settings:
@@ -150,14 +149,13 @@ func (l *Limiter) Init() (err error) {
 	return
 }
 
-/*
-Wrap this middleware method around a server's handler struct(s)
-to check each incoming request's IP against their
-limiter, and optionally against an IP whitelist and/or blacklist
-*/
-func (l *Limiter) LimitHandler(next http.Handler) http.Handler {
+
+// Wrap this middleware method around a server's handler struct(s)
+// to check each incoming request's IP against their
+// limiter, and optionally against an IP whitelist and/or blacklist
+func (l *Limiter) LimitHTTPHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// First update the state of the balancer
+		// First update the state of the limiter
 		l.updateState()
 		// If whitelist flag is set, check if incoming ip is on whitelist
 		if l.Whitelist.On {
@@ -182,39 +180,77 @@ func (l *Limiter) LimitHandler(next http.Handler) http.Handler {
 			}
 		}
 		// Call the getVisitor method to create or retreive
-		// the rate visitor struct with the limiters for the current user.
+		// the visitor struct with the limiters for the current user.
 		visitor := l.getVisitor(r.RemoteAddr)
 		// If they have exceeded their limit at the current state, return 429 status
 		if !l.allow(visitor) {
 			http.Error(w, http.StatusText(429), http.StatusTooManyRequests)
 			return
 		}
-
+		// If they pass all limits, call the downstream handler function
 		next.ServeHTTP(w, r)
 	})
 }
 
-// Balancer middleware method for a request handler function
-func (l *Limiter) LimitFunc(nextFunc func(http.ResponseWriter, *http.Request)) http.Handler {
-	return l.LimitHandler(http.HandlerFunc(nextFunc))
+// Limiter middleware method for a request handler function
+func (l *Limiter) LimitHTTPFunc(nextFunc func(http.ResponseWriter, *http.Request)) http.Handler {
+	return l.LimitHTTPHandler(http.HandlerFunc(nextFunc))
 }
 
-/*
-Used to add a new state to the balancer
-we create a limiter that triggers a transition to the
-defined state when the query rate exceeds the limit rate,
-while in this state visitors are limited
-by a limiter with vRate and vBurst
-The order indicates the position of this state relative to the others,
-when multiple state are triggered the highest order state becomes the active one
-*/
+// Limiter middleware method for lower level net connections
+// Both the accepted conn and your downstream handler need to be passed
+func (l *Limiter) LimitNetConn(conn net.Conn, connHandler func(net.Conn)) {
+	// First update the state of the limiter
+	l.updateState()
+	// Get remote ip from connection
+	addr := conn.RemoteAddr()
+	ip := addr.String()
+	// If whitelist flag is set, check if incoming ip is on whitelist
+	if l.Whitelist.On {
+		mtx.Lock()
+		in, _ := c.InArray(ip, l.Whitelist.list)
+		mtx.Unlock()
+		// If not on whitelist close the connection and return
+		if !in {
+			conn.Close()
+			return
+		}
+	}
+	// If blacklist flag is set, check if incoming ip is on blacklist
+	if l.Blacklist.On {
+		mtx.Lock()
+		in, _ := c.InArray(ip, l.Blacklist.list)
+		mtx.Unlock()
+		// If on blacklist close the connection and return
+		if in {
+			conn.Close()
+			return
+		}
+	}
+	// Call the getVisitor method to create or retreive
+	// the visitor struct with the limiters for the current user.
+	visitor := l.getVisitor(ip)
+	// If they have exceeded their limit at the current state,
+	// close the connection and return
+	if !l.allow(visitor) {
+		conn.Close()
+		return
+	}
+	// If they pass all limits, pass the connection to the handler func
+	connHandler(conn)
+}
+
+// Used to add a new state to the limiter we create a limiter that triggers a
+// transition to the defined state when the query rate exceeds the limit rate
+// While in this state visitors are limited by a limiter with vRate and vBurst
+// When multiple state are triggered the highest order state becomes active
 func (l *Limiter) AddState(order int, limit int, vRate rate.Limit, vBurst int) {
 	sRate := rate.Limit(limit)
 	l.triggers[order] = rate.NewLimiter(sRate, limit)
 	l.params[order] = params{rate: vRate, burst: vBurst}
 }
 
-// Update state variable based on balancers global limiter states
+// Update state variable based on limiters global limiter states
 func (l *Limiter) updateState() {
 	mtx.Lock()
 	l.useDefault = true
@@ -228,7 +264,7 @@ func (l *Limiter) updateState() {
 }
 
 // Checks whether or not a visitor (ip) is allowed
-// at the current balancer state
+// at the current limiter state
 func (l *Limiter) allow(v *visitor) bool {
 	mtx.Lock()
 	defer mtx.Unlock()
