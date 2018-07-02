@@ -15,8 +15,9 @@ func ReadList(loc string) (list []string, err error) {
 	return
 }
 
-// Common function to check if string is in array
-func InArray(val string, array []string) (exists bool, index int) {
+// Common function to check if string is in array and return it's index
+// If there are duplicates it returns the first found (lowest index)
+func InArray(array []string, val string) (exists bool, index int) {
 	exists = false
 	for i, v := range array {
 		if val == v {
