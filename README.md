@@ -4,7 +4,8 @@ A leaky-bucket based net/http limiter that can implement whitelisting,
 blacklisting, and enforce different rate limitations in response
 to changes in overall api demand
 
-Still a work in progress
+Still a work in progress <br />
+Needs to be properly tested and benchmarked
 
 ## Install
 
@@ -22,11 +23,11 @@ import "github.com/i-norden/golimiter"
 # users 1 api call per second with burst up to 6 per second
 
 lim := golimiter.Limiter{}
-lim.Rate = 5                                        # rate at which bucket refills
-lim.Burst = 15                                      # size of the bucket
+lim.Rate = 1                                        # rate at which bucket refills (per second)
+lim.Burst = 6                                       # size of the bucket
 lim.Whitelist.On = true                             # turn whitelisting on
 lim.Whitelist.Filename = "./whitelist_filename"     # whitelist location
-lim.Whitelist.UpdateFreq = 5                        # whitelist read frequency
+lim.Whitelist.UpdateFreq = 5                        # whitelist read frequency (in minutes)
 ```
 
 **Initiate the limiter's processes:**
@@ -58,10 +59,9 @@ go lim.LimitNetConn(conn, yourHandlerFunc)
 
 # In this case, yourHandlerFunc is of the type: func(conn net.Conn)
 ```
-
-**Experimental feature** <br />
-**Add universal request thresholds to the limiter and define new rate** <br />
-**restrictions to enforce when they are surpassed in attempt to balance load**
+**In attempt to adjust for changes in global api demand you can** <br />
+**add global request thresholds to the limiter and define new rate** <br />
+**restrictions to be enforced when these thresholds are surpassed**
 
 ```
 # The below adds a load threshold to the limiter of 5000 per second by
@@ -85,9 +85,9 @@ Note that white/blacklist files currently need to be in the form
 of a newline ("\n") delimitated list of the IP address strings
 
 Also note that the white/blacklists and the list of visitors with their
-associated limiters are internal to a limiter so two distinct
-limiter objects will enforce their own limitations completely independent of
-one another. You can reuse the same limiter on different handler functions
+associated limiters are internal to their limiter so distinct limiter
+objects will enforce their limitations completely independent of one
+another. So you can reuse the same limiter on different handler functions
 if you want to enforce shared api limitations across all of them or instantiate
 different limiters to impose separate limitations on each handler
 
